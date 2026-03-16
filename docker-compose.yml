@@ -31,15 +31,11 @@ services:
     container_name: insforge-postgrest
     restart: unless-stopped
     environment:
-      # POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      # POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      # POSTGRES_DB: ${POSTGRES_DB:-insforge}
       PGRST_DB_URI: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-insforge}
       PGRST_OPENAPI_SERVER_PROXY_URI: http://localhost:3000
       PGRST_DB_SCHEMA: public
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET:-dev-secret-please-change-in-production}
-      # Enable schema reloading via NOTIFY
       PGRST_DB_CHANNEL_ENABLED: true
       PGRST_DB_CHANNEL: pgrst
     ports:
@@ -78,12 +74,9 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-change-this-password}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      # S3-specific credentials (for Wasabi, MinIO, etc. — falls back to AWS_* if not set)
       - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-}
       - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-}
-      # Storage limits
       - MAX_FILE_SIZE=${MAX_FILE_SIZE:-}
-      # PostgreSQL connection
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=${POSTGRES_DB:-insforge}
@@ -91,27 +84,21 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-insforge}
       - POSTGREST_BASE_URL=http://postgrest:3000
-      # Deno Runtime URL for serverless functions
       - DENO_RUNTIME_URL=http://deno:7133
-      # Deno Subhosting Configuration
       - DENO_SUBHOSTING_TOKEN=${DENO_SUBHOSTING_TOKEN:-}
       - DENO_SUBHOSTING_ORG_ID=${DENO_SUBHOSTING_ORG_ID:-}
-      # Storage Configuration
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
       - AWS_REGION=${AWS_REGION:-}
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-}
       - AWS_CLOUDFRONT_URL=${AWS_CLOUDFRONT_URL:-}
       - AWS_CLOUDFRONT_KEY_PAIR_ID=${AWS_CLOUDFRONT_KEY_PAIR_ID:-}
       - AWS_CLOUDFRONT_PRIVATE_KEY=${AWS_CLOUDFRONT_PRIVATE_KEY:-}
-      # Multi-tenant Cloud Configuration
       - DEPLOYMENT_ID=${DEPLOYMENT_ID:-}
       - PROJECT_ID=${PROJECT_ID:-}
       - APP_KEY=${APP_KEY:-}
       - ACCESS_API_KEY=${ACCESS_API_KEY:-}
       - CLOUD_API_HOST=${CLOUD_API_HOST:-}
-      # LLM Model API keys
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      # OAuth Configuration
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
@@ -126,11 +113,7 @@ services:
       - X_CLIENT_SECRET=${X_CLIENT_SECRET:-}
       - APPLE_CLIENT_ID=${APPLE_CLIENT_ID:-}
       - APPLE_CLIENT_SECRET=${APPLE_CLIENT_SECRET:-}
-      # Logs directory
-      - LOGS_DIR=/insforge-logs
-      # Storage directory (for local file storage when S3 is not configured)
       - STORAGE_DIR=/insforge-storage
-      # Auth app URL for development proxy
       - AUTH_APP_URL=${AUTH_APP_URL:-http://localhost:7132}
     volumes:
       - ./package.json:/app/package.json
@@ -146,7 +129,6 @@ services:
       - auth_node_modules:/app/auth/node_modules
       - shared_schemas_node_modules:/app/shared-schemas/node_modules
       - ui_node_modules:/app/ui/node_modules
-      - shared-logs:/insforge-logs
       - storage-data:/insforge-storage
     command: sh -c "npm install && cd backend && npm run migrate:up && cd .. && npm run dev"
     restart: unless-stopped
@@ -155,7 +137,6 @@ services:
     networks:
       - insforge-network
 
-  # Deno serverless runtime for edge functions
   deno:
     image: denoland/deno:alpine-2.0.6
     container_name: insforge-deno
@@ -169,16 +150,13 @@ services:
       - PORT=7133
       - DENO_ENV=${DENO_ENV:-development}
       - DENO_DIR=/deno-dir
-      # PostgreSQL connection
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=${POSTGRES_DB:-insforge}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGREST_BASE_URL=http://postgrest:3000
-      # Worker timeout (60 seconds default)
       - WORKER_TIMEOUT_MS=${WORKER_TIMEOUT_MS:-60000}
-      # Encryption keys for decrypting function secrets
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production}
     volumes:
@@ -192,41 +170,6 @@ services:
         deno run --allow-net --allow-env --allow-read=./functions/worker-template.js --watch functions/server.ts
       "
     restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - insforge-network
-
-  # Vector.dev for log collection and shipping
-  vector:
-    container_name: insforge-vector
-    image: timberio/vector:0.28.1-alpine
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      postgrest:
-        condition: service_started
-      insforge:
-        condition: service_started
-      deno:
-        condition: service_started
-    volumes:
-      - ./deploy/docker-init/logs/vector.yml:/etc/vector/vector.yml:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - shared-logs:/insforge-logs
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7135/health"]
-      timeout: 5s
-      interval: 5s
-      retries: 3
-    environment:
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_REGION=${AWS_REGION:-skip}
-      - PROJECT_ID=${PROJECT_ID:-}
-      - HOSTNAME_OVERRIDE=${HOSTNAME_OVERRIDE:-}
-    command: ["--config", "/etc/vector/vector.yml"]
     security_opt:
       - no-new-privileges:true
     networks:
@@ -248,8 +191,6 @@ volumes:
   ui_node_modules:
     driver: local
   deno_cache:
-    driver: local
-  shared-logs:
     driver: local
   storage-data:
     driver: local
